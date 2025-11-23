@@ -1,223 +1,113 @@
 // =========================
 // Inisialisasi Peta
 // =========================
-const map = L.map("map").setView([-6.92, 107.61], 13);
+const map = L.map("map", {
+    layers: []
+}).setView([-6.92, 107.61], 13);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-}).addTo(map);
+// =========================
+// Basemap Options (6 jenis)
+// =========================
+const baseLayers = {
+    "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "OSM HOT": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "CartoDB Positron": L.tileLayer("https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "CartoDB Dark Matter": L.tileLayer("https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "Stamen Terrain": L.tileLayer("https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg", { maxZoom: 18 }),
+    "Stamen Toner": L.tileLayer("https://stamen-tiles.a.ssl.fastly.net/toner/{z}/{x}/{y}.png", { maxZoom: 18 })
+};
 
+let currentBaseLayer = baseLayers["OpenStreetMap"];
+currentBaseLayer.addTo(map);
+
+// =========================
+// Heatmap
+// =========================
 let heatLayer = null;
 
-
-// =========================
-// Helper Normalisasi
-// =========================
 function createNormalizer(arr, field) {
-    if (!arr || arr.length === 0) return () => 0;
-
-    const values = arr.map(o => o[field]);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const denom = max - min || 1;
-
-    return (v) => (v - min) / denom;
+    const vals = arr.map(o => o[field]);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    return v => (v - min) / (max - min || 1);
 }
 
+function buildHeatData() {
+    const wWaste = parseFloat(document.getElementById("wWaste").value);
+    const baseline = parseFloat(document.getElementById("baseline").value);
 
-// =========================
-// Convert meter → pixel (Leaflet)
-// =========================
-function metersToPixels(meters, lat, zoom) {
-    const earthCircumference = 40075016.686;
-    const latRad = lat * Math.PI / 180;
-    const metersPerPixel = earthCircumference * Math.cos(latRad) / Math.pow(2, zoom + 8);
+    const norm = createNormalizer(wastePoints, "waste_kg_per_day");
 
-    return meters / metersPerPixel;
+    return wastePoints.map(p => [
+        p.lat,
+        p.lng,
+        norm(p.waste_kg_per_day) * wWaste + baseline
+    ]);
 }
 
-
-// =========================
-// Build Heat Data (KDE)
-// =========================
-function buildHeatData(opt) {
-    const { useWaste, useInfra, useLandcover, wWaste, wInfra, wLandcover } = opt;
-
-    const heatData = [];
-
-    const normWaste = createNormalizer(wastePoints, "waste_kg_per_day");
-    const normInfra = createNormalizer(infraPoints, "infra_density");
-    const normLand = createNormalizer(landcoverPoints, "landcover_score");
-
-    if (useWaste) {
-        wastePoints.forEach(p => {
-            heatData.push([
-                p.lat,
-                p.lng,
-                (normWaste(p.waste_kg_per_day) * wWaste) + 0.3
-            ]);
-        });
-    }
-
-    if (useInfra) {
-        infraPoints.forEach(p => {
-            heatData.push([
-                p.lat,
-                p.lng,
-                (normInfra(p.infra_density) * wInfra) + 0.3
-            ]);
-        });
-    }
-
-    if (useLandcover) {
-        landcoverPoints.forEach(p => {
-            heatData.push([
-                p.lat,
-                p.lng,
-                (normLand(p.landcover_score) * wLandcover) + 0.3
-            ]);
-        });
-    }
-
-    return heatData;
-}
-
-
-// =========================
-// Render Heatmap - Dynamic KDE Radius
-// =========================
 function updateHeatmap() {
-    const useWaste = chkWaste.checked;
-    const useInfra = chkInfra.checked;
-    const useLandcover = chkLandcover.checked;
-
-    const wWaste = parseFloat(wWasteInput.value);
-    const wInfra = parseFloat(wInfraInput.value);
-    const wLandcover = parseFloat(wLandInput.value);
-
-    // ==============================
-    // Radius KDE (KM) dari slider (0.1–10 km)
-    // ==============================
-    const kdeRadiusKm = parseFloat(kdeRadiusInput.value); // sudah 0.1–10 km
-    const kdeRadiusMeters = kdeRadiusKm * 1000;
-
-    const heatData = buildHeatData({
-        useWaste,
-        useInfra,
-        useLandcover,
-        wWaste,
-        wInfra,
-        wLandcover
-    });
+    const heatData = buildHeatData();
 
     if (heatLayer) map.removeLayer(heatLayer);
-    if (heatData.length === 0) return;
-
-    const zoom = map.getZoom();
-    const centerLat = map.getCenter().lat;
-
-    const radiusPixels = metersToPixels(kdeRadiusMeters, centerLat, zoom);
 
     heatLayer = L.heatLayer(heatData, {
-        radius: radiusPixels,
-        blur: radiusPixels * 0.4,
-        maxZoom: 18
+        radius: 35,
+        blur: 20,
+        maxZoom: 17
     }).addTo(map);
 }
 
-
 // =========================
-// UI Binding
+// Basemap UI (floating button + thumbnail)
 // =========================
-const wWasteInput = document.getElementById("wWaste");
-const wInfraInput = document.getElementById("wInfra");
-const wLandInput = document.getElementById("wLandcover");
+document.getElementById("basemapButton").addEventListener("click", () => {
+    document.getElementById("basemapMenu").classList.toggle("hidden");
+});
 
-const wWasteVal = document.getElementById("wWasteVal");
-const wInfraVal = document.getElementById("wInfraVal");
-const wLandVal = document.getElementById("wLandcoverVal");
+document.querySelectorAll(".basemap-item").forEach(item => {
+    item.addEventListener("click", () => {
+        const layerName = item.getAttribute("data-layer");
+        const newLayer = baseLayers[layerName];
 
-const kdeRadiusInput = document.getElementById("kdeRadius");
-const kdeRadiusVal = document.getElementById("kdeRadiusVal");
+        if (currentBaseLayer) map.removeLayer(currentBaseLayer);
 
-const chkWaste = document.getElementById("chkWaste");
-const chkInfra = document.getElementById("chkInfra");
-const chkLandcover = document.getElementById("chkLandcover");
+        currentBaseLayer = newLayer;
+        currentBaseLayer.addTo(map);
 
-function bindUI() {
-    wWasteInput.addEventListener("input", () => {
-        wWasteVal.textContent = wWasteInput.value;
+        document.getElementById("basemapMenu").classList.add("hidden");
     });
-
-    wInfraInput.addEventListener("input", () => {
-        wInfraVal.textContent = wInfraInput.value;
-    });
-
-    wLandInput.addEventListener("input", () => {
-        wLandVal.textContent = wLandInput.value;
-    });
-
-    kdeRadiusInput.addEventListener("input", () => {
-        kdeRadiusVal.textContent = kdeRadiusInput.value;
-        updateHeatmap();
-    });
-
-    chkWaste.addEventListener("change", updateHeatmap);
-    chkInfra.addEventListener("change", updateHeatmap);
-    chkLandcover.addEventListener("change", updateHeatmap);
-
-    document.getElementById("btnUpdate").addEventListener("click", updateHeatmap);
-}
-
+});
 
 // =========================
-// Auto-update saat zoom
-// =========================
-map.on("zoomend", updateHeatmap);
-
-
-// =========================
-// Debug markers
+// Debug Marker Layer
 // =========================
 function addDebugMarkers() {
-    const w = L.layerGroup();
-    const i = L.layerGroup();
-    const l = L.layerGroup();
+    const wasteLayer = L.layerGroup();
 
-    wastePoints.forEach(p =>
-        L.circleMarker([p.lat, p.lng], { radius: 5, color: "red" })
-            .bindPopup(`Waste ${p.id}`)
-            .addTo(w)
-    );
+    wastePoints.forEach(p => {
+        L.circleMarker([p.lat, p.lng], {
+            radius: 5,
+            color: "#ef4444"
+        })
+        .bindPopup(`<strong>ID:</strong> ${p.id}<br><strong>Sampah:</strong> ${p.waste_kg_per_day} kg/hari`)
+        .addTo(wasteLayer);
+    });
 
-    infraPoints.forEach(p =>
-        L.circleMarker([p.lat, p.lng], { radius: 5, color: "blue" })
-            .bindPopup(`Infra ${p.id}`)
-            .addTo(i)
-    );
+    L.control.layers(baseLayers, { "Timbulan Sampah (marker)": wasteLayer }).addTo(map);
 
-    landcoverPoints.forEach(p =>
-        L.circleMarker([p.lat, p.lng], { radius: 5, color: "green" })
-            .bindPopup(`Land ${p.id}`)
-            .addTo(l)
-    );
-
-    L.control.layers(null, {
-        "Waste Points": w,
-        "Infra Points": i,
-        "Landcover Points": l
-    }).addTo(map);
-
-    w.addTo(map);
-    i.addTo(map);
-    l.addTo(map);
+    wasteLayer.addTo(map);
 }
-
 
 // =========================
 // Init
 // =========================
-bindUI();
 addDebugMarkers();
 updateHeatmap();
+
+document.getElementById("btnUpdate").addEventListener("click", updateHeatmap);
+document.getElementById("baseline").addEventListener("input", e => {
+    document.getElementById("baselineVal").textContent = e.target.value;
+});
+document.getElementById("wWaste").addEventListener("input", e => {
+    document.getElementById("wWasteVal").textContent = e.target.value;
+});
