@@ -1,60 +1,54 @@
 // =========================
 // Inisialisasi Peta
 // =========================
-const map = L.map("map").setView([-6.92, 107.61], 13);
+const map = L.map("map", {
+    layers: []
+}).setView([-6.92, 107.61], 13);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19
-}).addTo(map);
+// =========================
+// Basemap Options (6 jenis)
+// =========================
+const baseLayers = {
+    "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "OSM HOT": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "CartoDB Positron": L.tileLayer("https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "CartoDB Dark Matter": L.tileLayer("https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png", { maxZoom: 19 }),
+    "Stamen Terrain": L.tileLayer("https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg", { maxZoom: 18 }),
+    "Stamen Toner": L.tileLayer("https://stamen-tiles.a.ssl.fastly.net/toner/{z}/{x}/{y}.png", { maxZoom: 18 })
+};
 
+let currentBaseLayer = baseLayers["OpenStreetMap"];
+currentBaseLayer.addTo(map);
+
+// =========================
+// Heatmap
+// =========================
 let heatLayer = null;
 
-
-// =========================
-// Helper Normalisasi
-// =========================
 function createNormalizer(arr, field) {
-    if (!arr || arr.length === 0) return () => 0;
-
     const vals = arr.map(o => o[field]);
     const min = Math.min(...vals);
     const max = Math.max(...vals);
-    const denom = max - min || 1;
-
-    return (v) => (v - min) / denom;
+    return v => (v - min) / (max - min || 1);
 }
 
-
-// =========================
-// Build Heatmap Data
-// =========================
 function buildHeatData() {
     const wWaste = parseFloat(document.getElementById("wWaste").value);
     const baseline = parseFloat(document.getElementById("baseline").value);
 
-    const heatData = [];
+    const norm = createNormalizer(wastePoints, "waste_kg_per_day");
 
-    const normWaste = createNormalizer(wastePoints, "waste_kg_per_day");
-
-    wastePoints.forEach(p => {
-        const intensity = (normWaste(p.waste_kg_per_day) * wWaste) + baseline;
-
-        heatData.push([p.lat, p.lng, intensity]);
-    });
-
-    return heatData;
+    return wastePoints.map(p => [
+        p.lat,
+        p.lng,
+        norm(p.waste_kg_per_day) * wWaste + baseline
+    ]);
 }
 
-
-// =========================
-// Render Heatmap
-// =========================
 function updateHeatmap() {
     const heatData = buildHeatData();
 
-    if (heatLayer) {
-        map.removeLayer(heatLayer);
-    }
+    if (heatLayer) map.removeLayer(heatLayer);
 
     heatLayer = L.heatLayer(heatData, {
         radius: 35,
@@ -63,31 +57,29 @@ function updateHeatmap() {
     }).addTo(map);
 }
 
-
 // =========================
-// UI Events
+// Basemap UI (floating button + thumbnail)
 // =========================
-function bindUI() {
-    const wWasteInput = document.getElementById("wWaste");
-    const wWasteVal = document.getElementById("wWasteVal");
+document.getElementById("basemapButton").addEventListener("click", () => {
+    document.getElementById("basemapMenu").classList.toggle("hidden");
+});
 
-    const baselineInput = document.getElementById("baseline");
-    const baselineVal = document.getElementById("baselineVal");
+document.querySelectorAll(".basemap-item").forEach(item => {
+    item.addEventListener("click", () => {
+        const layerName = item.getAttribute("data-layer");
+        const newLayer = baseLayers[layerName];
 
-    wWasteInput.addEventListener("input", () => {
-        wWasteVal.textContent = wWasteInput.value;
+        if (currentBaseLayer) map.removeLayer(currentBaseLayer);
+
+        currentBaseLayer = newLayer;
+        currentBaseLayer.addTo(map);
+
+        document.getElementById("basemapMenu").classList.add("hidden");
     });
-
-    baselineInput.addEventListener("input", () => {
-        baselineVal.textContent = baselineInput.value;
-    });
-
-    document.getElementById("btnUpdate").addEventListener("click", updateHeatmap);
-}
-
+});
 
 // =========================
-// Debug Markers (Tetap Ada)
+// Debug Marker Layer
 // =========================
 function addDebugMarkers() {
     const wasteLayer = L.layerGroup();
@@ -96,19 +88,26 @@ function addDebugMarkers() {
         L.circleMarker([p.lat, p.lng], {
             radius: 5,
             color: "#ef4444"
-        }).bindPopup(
-            `<strong>Timbulan Sampah</strong><br>ID: ${p.id}<br>Sampah: ${p.waste_kg_per_day} kg/hari`
-        ).addTo(wasteLayer);
+        })
+        .bindPopup(`<strong>ID:</strong> ${p.id}<br><strong>Sampah:</strong> ${p.waste_kg_per_day} kg/hari`)
+        .addTo(wasteLayer);
     });
 
-    wasteLayer.addTo(map);
-    L.control.layers(null, { "Timbulan Sampah (marker)": wasteLayer }).addTo(map);
-}
+    L.control.layers(baseLayers, { "Timbulan Sampah (marker)": wasteLayer }).addTo(map);
 
+    wasteLayer.addTo(map);
+}
 
 // =========================
 // Init
 // =========================
-bindUI();
 addDebugMarkers();
 updateHeatmap();
+
+document.getElementById("btnUpdate").addEventListener("click", updateHeatmap);
+document.getElementById("baseline").addEventListener("input", e => {
+    document.getElementById("baselineVal").textContent = e.target.value;
+});
+document.getElementById("wWaste").addEventListener("input", e => {
+    document.getElementById("wWasteVal").textContent = e.target.value;
+});
